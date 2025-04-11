@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# Run in bash:
+# Make sure bash is set to the correct directory.
+# $ python pg_schema_dump_parser.py --directory . --configfile pg_schema_dump.config
+#
+
 import os
 import logging
 import re
@@ -79,15 +84,31 @@ def read_in_chunk(stream: str, separator: str) -> str:
                 yield part
 
 
-def pg_schema_dump(host: str, dbname: str, port: str, user: str, password: str) -> str:
+def pg_schema_dump(host: str, dbname: str, schema: str, port: str, user: str, password: str) -> str:
     """ Get schema dump of a postgres database """
 
+    parschema = '--schema'
+    # added schema option to the parameters.
+    # check if schema is blank for allowing all schemas in the database.
+    if len(schema) == 0:
+        parschema = ''
+    # since schema can become empty, changed the list to
+    # filter out blank entries to reduce potential errors.
+    # added --no-owner option so the schema can be used on other databases easier.
     pg_dump_proc = subprocess.Popen(
-        ['pg_dump',
-         f"--dbname=postgresql://{user}:{password}@{host}:{port}/{dbname}?application_name={APPLICATION_NAME}",
-         "--schema-only",
-         # '-f', dump_file,
-         ],
+        [
+            x for x in
+            [
+                r'pg_dump.exe',
+                f"--dbname=postgresql://{user}:{password}@{host}:{port}/{dbname}?application_name={APPLICATION_NAME}",
+                "--schema-only",
+                "--no-owner",
+                f"{parschema}",
+                f"{schema}"
+                # '-f', dump_file,
+            ]
+            if x
+        ],
         stdout=subprocess.PIPE
     )  # pylint: disable=R1732
     # clean up SET and SQL comments
@@ -125,9 +146,11 @@ def parse_schema(directory: str, object_type: str, schema: str, object_name: str
 def parse_object(stream: str, object_type: str, append: bool = True) -> None:
     """ Parses tables, views, materialized views, sequences, types, aggregates, defaults, constraints, rules,
     triggers, clustered indexes, comments, extensions, foreign tables, partitions """
-
-    schema_name = re.match(r"^(CREATE.*TABLE|COMMENT ON \w+|CREATE AGGREGATE|CREATE.*VIEW|CREATE TYPE|CREATE DOMAIN|CREATE SEQUENCE|ALTER.*TABLE \w+|ALTER.*TABLE|GRANT.*ON \w+|REVOKE.*ON \w+|.*TRIGGER.*?ON|.*RULE.*\n.*?ON.*) (\w+).(\w+)", stream, re.I).group(2)
-    object_name = re.match(r"^(CREATE.*TABLE|COMMENT ON \w+|CREATE AGGREGATE|CREATE.*VIEW|CREATE TYPE|CREATE DOMAIN|CREATE SEQUENCE|ALTER.*TABLE \w+|ALTER.*TABLE|GRANT.*ON \w+|REVOKE.*ON \w+|.*TRIGGER.*?ON|.*RULE.*\n.*?ON.*) (\w+).(\w+)", stream, re.I).group(3)
+    
+    # changed 'CREATE SEQUENCE' to 'CREATE.*SEQUENCE' to allow for UNLOGGED SEQUENCE.
+    # added 'CREATE COLLATION'
+    schema_name = re.match(r"^(CREATE.*TABLE|COMMENT ON \w+|CREATE AGGREGATE|CREATE.*VIEW|CREATE TYPE|CREATE DOMAIN|CREATE COLLATION|CREATE.*SEQUENCE|ALTER.*TABLE \w+|ALTER.*TABLE|GRANT.*ON \w+|REVOKE.*ON \w+|.*TRIGGER.*?ON|.*RULE.*\n.*?ON.*) (\w+).(\w+)", stream, re.I).group(2)
+    object_name = re.match(r"^(CREATE.*TABLE|COMMENT ON \w+|CREATE AGGREGATE|CREATE.*VIEW|CREATE TYPE|CREATE DOMAIN|CREATE COLLATION|CREATE.*SEQUENCE|ALTER.*TABLE \w+|ALTER.*TABLE|GRANT.*ON \w+|REVOKE.*ON \w+|.*TRIGGER.*?ON|.*RULE.*\n.*?ON.*) (\w+).(\w+)", stream, re.I).group(3)
     parse_schema(args.directory, object_type, schema_name, object_name, stream, append)
 
 
@@ -179,7 +202,7 @@ def parse_function(stream: str, object_type: str, append: bool = False) -> None:
 
 
 def parse_utility(stream: str, utility_type: str, append: bool = True) -> None:
-    """ Parses utilitities such as triggers, ownerships, acls, comments, mappings, schemas, rules, events, servers """
+    """ Parses utilitities such as triggers, ownerships, acls, comments, mappings, schemas, rules, events, servers, collations """
 
     parse_schema(args.directory, 'utilities', 'others', utility_type, stream, append)
 
@@ -197,12 +220,17 @@ if __name__ == "__main__":
     args_parser.add_argument('--configfile', required=True, help="Database configuration file, see sample")
     args = args_parser.parse_args()
 
+    thisfolder = os.path.dirname(os.path.abspath(__file__))
+    test_config_path = os.path.join(thisfolder, 'pg_schema_dump.config')
     config = configparser.ConfigParser()
-    config.read(args.configfile)
+    #config.read(args.configfile)
+    config.read(test_config_path)
 
     postgres_host = config.get('postgresql', 'host')
     postgres_port = config.get('postgresql', 'port')
     postgres_db = config.get('postgresql', 'db')
+    # added schema option to allow getting just a single schema from a database.
+    postgres_schema = config.get('postgresql', 'schema')
     postgres_user = config.get('postgresql', 'user')
     postgres_password = config.get('postgresql', 'password')
 
@@ -212,7 +240,11 @@ if __name__ == "__main__":
 
     start_time = time()
 
-    with pg_schema_dump(postgres_host, postgres_db, postgres_port, postgres_user, postgres_password) as f:
+	#
+    #	Added postgres_schema to the function parameters.
+    #
+    
+    with pg_schema_dump(postgres_host, postgres_db, postgres_schema, postgres_port, postgres_user, postgres_password) as f:
         logger.info(f"Started parser: {APPLICATION_NAME}")
         for segment in read_in_chunk(f, separator=';\n'):
             if segment:
@@ -244,7 +276,8 @@ if __name__ == "__main__":
                 parse_object(segment, 'types')
             elif segment.startswith("CREATE DOMAIN"):
                 parse_object(segment, 'domains')
-            elif segment.startswith("CREATE SEQUENCE"):
+            # added 'CREATE UNLOGGED SEQUENCE' option.
+            elif segment.startswith(("CREATE SEQUENCE", "CREATE UNLOGGED SEQUENCE")):
                 parse_object(segment, 'sequences')
             elif segment.startswith(("CREATE TRIGGER", "CREATE OR REPLACE TRIGGER", "CREATE CONSTRAINT TRIGGER", "CREATE OR REPLACE CONSTRAINT TRIGGER", "ALTER TRIGGER")) or "DISABLE TRIGGER" in segment or re.search(r"ENABLE.*TRIGGER", segment):
                 parse_object(segment, 'triggers')
@@ -278,6 +311,9 @@ if __name__ == "__main__":
                 parse_utility(segment, 'subscriptions')
             elif segment.startswith("ALTER SUBSCRIPTION") and "OWNER TO" not in segment:
                 parse_utility(segment, 'subscriptions')
+            # added 'CREATE COLLATION' option.
+            elif segment.startswith("CREATE COLLATION"):
+                parse_utility(segment, 'collations')
             elif segment.startswith(("ALTER TABLE", "ALTER FOREIGN TABLE")) and "ADD GENERATED ALWAYS AS IDENTITY" in segment:
                 parse_object(segment, 'identities')
             elif segment.startswith(("ALTER TABLE", "ALTER FOREIGN TABLE")) and re.search(r".*ROW LEVEL SECURITY", segment):

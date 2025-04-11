@@ -23,3 +23,22 @@ a generic schema name `others`.
 ## Metadata
 A metadata is generated along with the schema files. It contains details of the database version, database host, database name, pg_dump version
 and warnings.
+
+# My Fork of [bolajiwahab / pg_schema_dump_parser]
+
+## Why This Fork Exists
+I forked this repository as I was unable to send these changes to the original developer.
+
+## Changes in This Fork
+-  To allow for processing of UNIQUE SEQUENCES
+-  Added processing COLLATIONs.
+-  Also added the ability to filter by what schema to export in the config.
+   Can leave blank to process all schemas in the database.
+- [Explain why these changes matter]
+
+## How to Contribute
+Feel free to submit PRs, report issues, or suggest improvements. Every contribution helps!
+
+## Credits
+This project builds on the fantastic work of [bolajiwahab / pg_schema_dump_parser].
+

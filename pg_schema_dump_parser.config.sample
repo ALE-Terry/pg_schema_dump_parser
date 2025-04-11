@@ -2,5 +2,6 @@
 host=localhost
 port=5432
 db=postgres
+schema=public
 user=postgres
 password=postgres
