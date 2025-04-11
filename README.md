@@ -9,9 +9,6 @@ a generic schema name `others`.
 - `pg_dump`
 - `psql`
 
-## Sample parsed schema
-![plot](sample_schema.png)
-
 ## Running the program
 - Create `pg_schema_dump_parser.config` with template `pg_schema_dump_parser.config.sample` replacing the necessary values
 - Then you can call the program as such:
